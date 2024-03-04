@@ -99,6 +99,3 @@ class DatasetLoader(object):
         raise NotImplementedError
       
       
-def medical_meadow_medical_flashcards_data_loader(DatasetLoader):
-  dataset = load_dataset("medalpaca/medical_meadow_medical_flashcards")
-  pass 

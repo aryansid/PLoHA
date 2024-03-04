@@ -3,14 +3,6 @@ from transformers import AutoTokenizer
 
 import data_utils
 
-
-# for i in range(5): 
-#     print(f"Sample {i+1}:")
-#     print(f"Input: {dataset['train'][i]['input']}")
-#     print(f"Instruction: {dataset['train'][i]['instruction']}")
-#     print(f"Output: {dataset['train'][i]['output']}\n")
-
-
 def use_standard_distillation(): 
   def tokenize_function(examples):
             model_inputs = tokenizer(
