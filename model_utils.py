@@ -19,7 +19,7 @@ class RationaleDataCollator(DataCollatorForSeq2Seq):
             'rationales': rationale_batch,
         }
 
-class CustomTrainer(Seq2SeqTrainer):
+class PLoHATrainer(Seq2SeqTrainer):
     def __init__(self, *args, alpha=0.5, **kwargs):
         super().__init__(*args, **kwargs)
         self.alpha = alpha  # weight for balancing label loss and rationale loss
