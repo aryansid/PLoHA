@@ -2,7 +2,7 @@ import torch
 from transformers import Seq2SeqTrainer
 from torch.nn import functional as F
 
-class CustomTrainerWithSelfDistillation(Seq2SeqTrainer):
+class PLoHATrainerWithSelfDistillation(Seq2SeqTrainer):
     def __init__(self, *args, distillation_temperature=2.0, distillation_alpha=0.5, **kwargs):
         super().__init__(*args, **kwargs)
         self.distillation_temperature = distillation_temperature
