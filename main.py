@@ -1,116 +1,115 @@
-import argparse
-from transformers import AutoTokenizer
+import torch
+from torch.utils.data import DataLoader, Dataset
+from transformers import T5ForConditionalGeneration, T5Tokenizer, AdamW, get_linear_schedule_with_warmup
+import numpy as np
+import json
 
-import data_utils
+# Custom Dataset class for handling medical QA data
+class MedicalQADataset(Dataset):
+    def __init__(self, tokenizer, data_file, max_len=512):
+        self.tokenizer = tokenizer  # T5 tokenizer
+        self.inputs = []  # Store input texts
+        self.targets = []  # Store target texts
 
-def run(args): 
-  datasets = dataset_loader.load_from_json()
+        # Load data from JSON file
+        with open(data_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
 
-  if args.llm == 'gpt':
-    train_llm_rationales, train_llm_labels = dataset_loader.load_gpt_preds(split='train')
-    test_llm_rationales, test_llm_labels = dataset_loader.load_gpt_preds(split='test')
+        for line in lines:
+            data = json.loads(line)
+            # Prepare inputs for both answering and rationale generation, if available
+            self.inputs.append(f"answer: {data['question']}")
+            self.targets.append(data['answer'])
+            if data.get('rationale'):
+                self.inputs.append(f"rationale: {data['question']}")
+                self.targets.append(data['rationale'])
 
-  if args.llm is not None: 
-    datasets['train'] = datasets['train'].add_column('llm_label', train_llm_labels)
-    datasets['test'] = datasets['test'].add_column('llm_label', test_llm_labels)
-    datasets['train'] = datasets['train'].add_column('llm_rationale', train_llm_rationales)
-    datasets['test'] = datasets['test'].add_column('llm_rationale', test_llm_rationales) 
-    
-  if dataset_loader.has_valid:
-    if args.llm == 'gpt': 
-      valid_llm_rationales, valid_llm_labels = dataset_loader.load_gpt_preds(split='valid')
-  else: 
-    train_valid_datasets = datasets['train'].train_test_split(test_size=0.1, seed=0)
+        self.max_len = max_len
 
-    datasets = DatasetDict({
-            'train': train_valid_datasets['train'],
-            'valid': train_valid_datasets['test'],
-            'test': datasets['test'],
-    })
-    
-  if args.label_type == 'llm' and args.llm is not None: 
-    train_label_acc = compute_text_acc(datasets['train']['llm_label'], datasets['train']['label'])
-    test_label_acc = compute_text_acc(datasets['test']['llm_label'], datasets['test']['label'])
-    
-    print(f'LLM Train Acc: {train_label_acc:.4f}')
-    print(f'LLM Test Acc: {test_label_acc:.4f}')
+    def __len__(self):
+        return len(self.inputs)
 
-    datasets['train'] = datasets['train'].remove_columns('label')
-    datasets['train'] = datasets['train'].add_column('label', datasets['train']['llm_label'])
-    
-  if args.llm is not None:
-    if 'rationale' in datasets['train'].column_names:
-            datasets = datasets.remove_columns('rationale')
-    datasets = datasets.rename_column('llm_rationale', 'rationale')
+    def __getitem__(self, idx):
+        input_text = self.inputs[idx]
+        target_text = self.targets[idx]
 
-  if args.model_type == 'task_prefix' and args.llm is not None:
-        def tokenize_function(examples):
-            model_inputs = tokenizer(['predict: ' + text for text in examples['input']], max_length=args.max_input_length, truncation=True)
-            expl_model_inputs = tokenizer(['explain: ' + text for text in examples['input']], max_length=args.max_input_length, truncation=True)
-            model_inputs['expl_input_ids'] = expl_model_inputs['input_ids']
-            model_inputs['expl_attention_mask'] = expl_model_inputs['attention_mask']
+        # Tokenize input and target texts
+        input_enc = self.tokenizer(input_text, max_length=self.max_len, padding='max_length', truncation=True, return_tensors="pt")
+        target_enc = self.tokenizer(target_text, max_length=self.max_len, padding='max_length', truncation=True, return_tensors="pt")
 
-            with tokenizer.as_target_tokenizer():
-                label_output_encodings = tokenizer(examples['label'], max_length=256, truncation=True)
-                rationale_output_encodings = tokenizer(examples['rationale'], max_length=256, truncation=True)
+        return {
+            'input_ids': input_enc['input_ids'].flatten(),
+            'attention_mask': input_enc['attention_mask'].flatten(),
+            'labels': target_enc['input_ids'].flatten()
+        }
 
-            model_inputs['labels'] = label_output_encodings['input_ids']
-            model_inputs['aux_labels'] = rationale_output_encodings['input_ids']
+# Train the model for one epoch
+def train_epoch(model, data_loader, optimizer, device, scheduler):
+    model = model.train()  # Set model to training mode
+    losses = []  # Store losses for each step
 
-            return model_inputs
+    for d in data_loader:
+        input_ids = d['input_ids'].to(device)
+        attention_mask = d['attention_mask'].to(device)
+        labels = d['labels'].to(device)
 
-  elif args.model_type == 'standard':
-        def tokenize_function(examples):
-            model_inputs = tokenizer(
-                examples['input'],
-                max_length=args.max_input_length,
-                truncation=True
-            )
+        # Forward pass: compute predicted outputs by passing inputs to the model
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+        loss = outputs.loss  # Extract the loss
 
-            with tokenizer.as_target_tokenizer():
-                label_output_encodings = tokenizer(examples['label'], max_length=256, truncation=True)
+        losses.append(loss.item())
 
-            model_inputs['labels'] = label_output_encodings['input_ids']
+        loss.backward()  # Backward pass to compute gradient of loss wrt parameters
+        optimizer.step()  # Update parameters
+        scheduler.step()  # Update learning rate schedule
+        optimizer.zero_grad()  # Clear gradients
 
-            return model_inputs
+    return np.mean(losses)  # Return average loss
 
-  if args.llm is None:
-        tokenized_datasets = datasets.map(
-            tokenize_function,
-            remove_columns=['input', 'label'],
-            batched=True
-        )
-  else:
-        tokenized_datasets = datasets.map(
-            tokenize_function,
-            remove_columns=['input', 'rationale', 'label', 'llm_label'],
-            batched=True
-        )
+# Evaluate the model
+def eval_model(model, data_loader, device):
+    model = model.eval()  # Set model to evaluation mode
+    losses = []
 
+    with torch.no_grad():  # Inference mode, gradients not needed
+        for d in data_loader:
+            input_ids = d['input_ids'].to(device)
+            attention_mask = d['attention_mask'].to(device)
+            labels = d['labels'].to(device)
 
-  if args.model_type == 'standard':
-        if args.dataset not in ['svamp', 'asdiv']:
-            compute_metrics = compute_metrics_text_aux(tokenizer)
-        else:
-            compute_metrics = compute_metrics_equation_aux(tokenizer)
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+            loss = outputs.loss
+            losses.append(loss.item())
 
-  else:
-        if args.dataset not in ['svamp', 'asdiv']:
-            compute_metrics = compute_metrics_text(tokenizer)
-        else:
-            compute_metrics = compute_metrics_equation(tokenizer)
+    return np.mean(losses)  # Return average loss
 
+# Run the training process
+def run_training(model, train_data_loader, val_data_loader, optimizer, device, scheduler, epochs=3):
+    for epoch in range(epochs):
+        train_loss = train_epoch(model, train_data_loader, optimizer, device, scheduler)
+        print(f'Epoch {epoch + 1}/{epochs}, Train Loss: {train_loss:.4f}')
 
-  train_and_evaluate(args, args.run, tokenizer, tokenized_datasets, compute_metrics)
+        val_loss = eval_model(model, val_data_loader, device)
+        print(f'Epoch {epoch + 1}/{epochs}, Val Loss: {val_loss:.4f}')
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--from_pretrained', type=str, required=True)
-    parser.add_argument('--dataset', type=str, default='medalpaca/medical_meadow_medical_flashcards')
-    parser.add_argument('--model_type', type=str, default='standard')
-    parser.add_argument('--label_type', type=str, default='llm')
-    parser.add_argument('--batch_size', type=int, default=64)
-    
-    args = parser.parse_args()
-    run(args)
-  
+if __name__ == "__main__": 
+  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+  tokenizer = T5Tokenizer.from_pretrained('google/t5-v1_1-base')  # Initialize tokenizer
+  model = T5ForConditionalGeneration.from_pretrained('google/t5-v1_1-base').to(device)  # Load model and send to device
+
+  # Prepare datasets and data loaders for training and validation
+  train_dataset = MedicalQADataset(tokenizer, 'anki_flashcards_train.json')
+  train_data_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+  val_dataset = MedicalQADataset(tokenizer, 'anki_flashcards_test.json')
+  val_data_loader = DataLoader(val_dataset, batch_size=64)
+
+  # Initialize optimizer and learning rate scheduler
+  optimizer = AdamW(model.parameters(), lr=5e-5)
+  scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=len(train_data_loader) * 3)
+
+  # Start the training and validation process
+  run_training(model, train_data_loader, val_data_loader, optimizer, device, scheduler, epochs=3)
+
+  # Save the model
+  model.save_pretrained("my_model")
+  tokenizer.save_pretrained("my_tokenizer")
