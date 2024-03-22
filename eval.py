@@ -1,3 +1,7 @@
+# *****************
+# Evaluate model performance on USMLE 
+# ****************
+
 import torch
 from datasets import load_dataset
 from transformers import T5ForConditionalGeneration, T5Tokenizer

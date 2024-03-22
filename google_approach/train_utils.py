@@ -22,7 +22,7 @@ from transformers import T5ForConditionalGeneration
 from transformers import DataCollatorForSeq2Seq
 from transformers.trainer_utils import set_seed
 
-from model_utils import TaskPrefixDataCollator, TaskPrefixTrainer
+from google_approach.model_utils import TaskPrefixDataCollator, TaskPrefixTrainer
 
 
 def get_config_dir(args):

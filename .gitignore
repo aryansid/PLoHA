@@ -1,7 +1,9 @@
 .env
 google_datasets
-medical_datasets
+medalpaca_datasets
 ploha_env
 __pycache__
 .vscode
 ssh_key
+few_shot_prompt.txt
+textbook_extraction.json

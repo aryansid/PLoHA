@@ -1,10 +1,13 @@
+# *****************
+# Train T5 
+# ****************
+
 import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import T5ForConditionalGeneration, T5Tokenizer, AdamW, get_linear_schedule_with_warmup
 import numpy as np
 import json
 
-# Custom Dataset class for handling medical QA data
 class MedicalQADataset(Dataset):
     def __init__(self, tokenizer, data_file, max_len=512):
         self.tokenizer = tokenizer  # T5 tokenizer
@@ -25,7 +28,7 @@ class MedicalQADataset(Dataset):
                 self.targets.append(data['rationale'])
 
         self.max_len = max_len
-
+        
     def __len__(self):
         return len(self.inputs)
 
@@ -94,13 +97,13 @@ def run_training(model, train_data_loader, val_data_loader, optimizer, device, s
 
 if __name__ == "__main__": 
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-  tokenizer = T5Tokenizer.from_pretrained('google/t5-v1_1-base')  # Initialize tokenizer
-  model = T5ForConditionalGeneration.from_pretrained('google/t5-v1_1-base').to(device)  # Load model and send to device
+  tokenizer = T5Tokenizer.from_pretrained('google-t5/t5-large')  # Initialize tokenizer
+  model = T5ForConditionalGeneration.from_pretrained('google-t5/t5-large').to(device)  # Load model and send to device
 
   # Prepare datasets and data loaders for training and validation
-  train_dataset = MedicalQADataset(tokenizer, 'anki_flashcards_train.json')
+  train_dataset = MedicalQADataset(tokenizer, 'usmle_both_train.json')
   train_data_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-  val_dataset = MedicalQADataset(tokenizer, 'anki_flashcards_test.json')
+  val_dataset = MedicalQADataset(tokenizer, 'usmle_both_test.json')
   val_data_loader = DataLoader(val_dataset, batch_size=64)
 
   # Initialize optimizer and learning rate scheduler

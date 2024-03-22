@@ -41,89 +41,160 @@ def gpt(system, user, model="gpt-3.5-turbo-0125"):
         print(f"Error in OpenAI API call: {e}")
         return None
     
+def combine_datasets(path1, path2, destination_path): 
+    with open(destination_path, "w") as dest_file: 
+        with open(path1, "r") as file1:
+            for line in file1: 
+                obj = json.loads(line)
+                dest_file.write(json.dumps(obj) + "\n")
+                
+        with open(path2, 'r') as file2:
+            for line in file2:
+                obj = json.loads(line)
+                dest_file.write(json.dumps(obj) + '\n')
 
-class PrepareDataset: 
-    def __init__(self, data_root, dataset_name): 
-        self.data_root = data_root
+class PrepareMCQDataset(): 
+    def __init__(self, data_path, dataset_root, dataset_name):
+        self.data_path = data_path
+        self.dataset_root = dataset_root
         self.dataset_name = dataset_name
         
-    def create_dataset(self): 
-        # save as JSON ! 
-        pass 
-
+    def format_entry(self, example):
+        question = example['question']
+        options = example['options']
+        options_text = " ".join([f"{key}: {value}" for key, value in options.items()])
+        input_text = f"{question} Options: {options_text}"
+        return input_text
     
-    def post_process_dataset(self):
-        dataset_path = f'{self.data_root}/{self.dataset_name}.txt'
-        with open(dataset_path, 'r', encoding='utf-8') as file:
-            lines = file.readlines()
+    def create_dataset(self):
+        raise NotImplementedError
+    
+    def split_dataset(self): 
+        data = []
+        with open(f"{self.dataset_root}/{self.dataset_name}.json", "r") as file: 
+            for line in file: 
+                data.append(json.loads(line))
             
-        train_lines, test_lines = train_test_split(lines, test_size=0.2) 
+        train_data, test_data = train_test_split(data, test_size=0.2)
         
-        train_file_path = f'{self.data_root}/{self.dataset_name}_train.json'
-        test_file_path = f'{self.data_root}/{self.dataset_name}_test.json'
-        self._save_lines_to_json(train_lines, train_file_path)
-        self._save_lines_to_json(test_lines, test_file_path)
-    
-    # If in case data was stored in format other than JSON    
-    def _save_lines_to_json(self, lines, file_path): 
-        with open(file_path, 'w', encoding='utf-8') as file:
-            for line in csv.reader(lines, delimiter=',', quotechar='"'):
-                if len(line) == 3:
-                    data = {
-                        "question": line[0].strip(),
-                        "answer": line[1].strip(),
-                        "rationale": line[2].strip()
-                    }
-                    json.dump(data, file)
-                    file.write('\n') 
+        with open(f"{self.dataset_root}/{self.dataset_name}_train.json", "w") as outfile:
+            for entry in train_data: 
+                json.dump(entry, outfile)
+                outfile.write("\n")
+        
+        with open(f"{self.dataset_root}/{self.dataset_name}_test.json", "w") as outfile:
+            for entry in test_data: 
+                json.dump(entry, outfile)
+                outfile.write("\n")   
 
-
+class PrepareMCQDatasetUsmle4(PrepareMCQDataset):
+    def __init__(self, data_path, dataset_root, dataset_name):
+        super().__init__(data_path, dataset_root, dataset_name)
+        
+    def format_entry(self, example):
+        return super().format_entry(example) 
     
+    def create_dataset(self):
+        dataset = load_dataset("GBaker/MedQA-USMLE-4-options", split="train")
+  
+        with open("cot_medical_datasets/usmle_4.json", "w") as outfile:
+            for entry in dataset: 
+                formatted_question = self.format_entry(entry)
+                answer = entry["answer"]
+                
+                qa = f"Question: {formatted_question}\nAnswer: {answer}"
+                # rationale = gpt(PROMPT, qa)
+                rationale = ""
+                
+                entry = {
+                    "question": formatted_question, 
+                    "answer": answer, 
+                    "rationale": rationale
+                }
+                
+                json.dump(entry, outfile)
+                outfile.write("\n")
+    
+class PrepareMCQDatasetUsmleSelfAssesment(PrepareMCQDataset): 
+    def __init__(self, data_path, dataset_root, dataset_name):
+        super().__init__(data_path, dataset_root, dataset_name)
+        
+    def preprocess_data(self): 
+        question_file_paths = ["C:/Users/aryaa/OneDrive/Documents/Stanford/CS 224N/PLoHA/medalpaca_datasets/medical_meadow_usmle_self_assessment/step1.json", "C:/Users/aryaa/OneDrive/Documents/Stanford/CS 224N/PLoHA/medalpaca_datasets/medical_meadow_usmle_self_assessment/step2.json", "C:/Users/aryaa/OneDrive/Documents/Stanford/CS 224N/PLoHA/medalpaca_datasets/medical_meadow_usmle_self_assessment/step3.json"]
+        combined_questions = []
+        
+        for path in question_file_paths: 
+            with open(path, 'r') as file: 
+                data = json.load(file)
+                combined_questions.extend(data)
+                
+        with open("C:/Users/aryaa/OneDrive/Documents/Stanford/CS 224N/PLoHA/medalpaca_datasets/medical_meadow_usmle_self_assessment/questions.json", "w") as combined_file: 
+            json.dump(combined_questions, combined_file, indent=4)
+            
+        answer_file_paths = ["C:/Users/aryaa/OneDrive/Documents/Stanford/CS 224N/PLoHA/medalpaca_datasets/medical_meadow_usmle_self_assessment/step1_solutions.json", "C:/Users/aryaa/OneDrive/Documents/Stanford/CS 224N/PLoHA/medalpaca_datasets/medical_meadow_usmle_self_assessment/step2_solutions.json", "C:/Users/aryaa/OneDrive/Documents/Stanford/CS 224N/PLoHA/medalpaca_datasets/medical_meadow_usmle_self_assessment/step3_solutions.json"]
+        combined_answers = []
+        
+        for path in answer_file_paths: 
+            with open(path, 'r') as file: 
+                data = json.load(file)
+                combined_answers.extend(data.values())
+                
+        with open("C:/Users/aryaa/OneDrive/Documents/Stanford/CS 224N/PLoHA/medalpaca_datasets/medical_meadow_usmle_self_assessment/answers.json", "w") as combined_file: 
+            json.dump(combined_answers, combined_file, indent=4)
+    
+    
+    def format_entry(self, example):
+        return super().format_entry(example) 
+    
+    def create_dataset(self):  
+        with open("medalpaca_datasets/medical_meadow_usmle_self_assessment/questions.json", "r") as file1, open("medalpaca_datasets/medical_meadow_usmle_self_assessment/answers.json", "r") as file2:
+            questions = json.load(file1)
+            answers = json.load(file2)
+        
+        with open("cot_medical_datasets/usmle_self_assessment.json", "w") as outfile: 
+            for question, answer in zip(questions, answers):
+                formatted_question = self.format_entry(question)
+                if answer in question["options"]: 
+                    formatted_answer = question["options"][answer]
+                else: 
+                    print(f"Q: {formatted_question} \n")
+                    print(f"Key: {answer}")
+                    break
+                
+                qa = f"Question: {formatted_question}\nAnswer: {formatted_answer}"
+                # rationale = gpt(PROMPT, qa)
+                rationale = ""
+                
+                entry = {
+                    "question": formatted_question, 
+                    "answer": formatted_answer, 
+                    "rationale": rationale
+                }
+                
+                json.dump(entry, outfile)
+                outfile.write("\n")
+            
 
 if __name__ == "__main__": 
-    data_root = "cot_medical_datasets"
-    dataset_name = "anki_flashcards"
+    dataset_root = "cot_medical_datasets"
     
-    preparer = PrepareDataset(data_root=data_root, dataset_name=dataset_name)
-    preparer.post_process_dataset()
+    # data_path = ""
     
-    # input_file_path = "mmmf"
-    # output_file_path = "mmmf_1.txt"
+    # dataset_name = "usmle_4"
+    # preparer = PrepareMCQDatasetUsmle4(data_path=data_path, dataset_root=dataset_root, dataset_name=dataset_name)
+    # preparer.split_dataset()
     
-    # seen_inputs = set()
+    # dataset_name = "usmle_self_assessment"
+    # preparer = PrepareMCQDataset(data_path=data_path, dataset_root=dataset_root, dataset_name=dataset_name)
+    # preparer.split_dataset()
     
-    # with open(input_file_path, 'r', encoding='utf-8') as input_file, \
-    #     open(output_file_path, 'w', encoding='utf-8', newline='') as output_file:
-            
-    #     reader = csv.reader(input_file)
-    #     writer = csv.writer(output_file)
-        
-    #     current_iteration = 0
-        
-    #     for parts in reader: 
-    #         current_iteration += 1
-    #         print(f"Iteration {current_iteration} completed")
-            
-    #         if len(parts) == 5 and parts[3] not in seen_inputs: 
-    #             formatted_line = [parts[3], parts[1], parts[4]]
-    #             writer.writerow(formatted_line)
-    #             seen_inputs.add(parts[3])
-                
-            
-#   dataset = load_from_disk("medical_datasets/medical_meadow_medical_flashcards")
-#   df = pd.DataFrame(dataset['train'])
-  
-#   rationales = []
-#   for index, row in df.iterrows():
-#     print(f"Index: {index}")
-#     qa = f"Question: {row['input']}\nAnswer: {row['output']}"
-#     rationale = gpt(PROMPT, qa)
-#     rationales.append(rationale)
+    path1 = "cot_medical_datasets/usmle_4_test.json"
+    path2 = "cot_medical_datasets/usmle_self_assessment_test.json"
+    path3 = "cot_medical_datasets/usmle_both_test.json"
+    combine_datasets(path1, path2, path3)
     
-#   df['rationale'] = rationales
-  
-#   df.to_csv("mmmf")
-
-
+    
+    
+    
   
   
